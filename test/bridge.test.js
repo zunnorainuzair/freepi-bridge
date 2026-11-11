@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createQueue, errorFromUpstream, upstreamHeaders } from '../src/upstream.js';
+import { stripReasoningKnobs } from '../src/server.js';
 import { resolveModelId, FALLBACK_MODELS } from '../src/catalog.js';
-import { dshPatch, cleanModelName, openaiEnvSnippet, DSH_PROVIDER_ID } from '../src/snippets.js';
+import { dshPatch, cleanModelName, openaiEnvSnippet, DSH_PROVIDER_ID, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from '../src/snippets.js';
 import { splitEntries } from '../src/patchfile.js';
 import { defaultSessionId, decodeJwt, loadConfig } from '../src/config.js';
 
@@ -130,8 +131,8 @@ test('dshPatch emits schema-valid provider fields', () => {
   assert.match(y, /api: openai-completions/);
   assert.match(y, /baseURL: http:\/\/127\.0\.0\.1:9001\/v1/);
   assert.match(y, /- id: a-model/);
-  assert.match(y, /contextWindow: 200000/);
-  assert.match(y, /maxTokens: 32768/);
+  assert.match(y, new RegExp(`contextWindow: ${DEFAULT_CONTEXT_WINDOW}`));
+  assert.match(y, new RegExp(`maxTokens: ${DEFAULT_MAX_TOKENS}`));
   assert.match(y, /provider: freepi/);
   assert.match(y, /model: a-model/);
 });
@@ -200,4 +201,53 @@ test('dshPatch provider uses the lower-case id dsh requires', () => {
   assert.match(y, /provider: freepi/);
   assert.equal(DSH_PROVIDER_ID, 'freepi');
   assert.equal(DSH_PROVIDER_ID, DSH_PROVIDER_ID.toLowerCase());
+});
+
+// --------------------------------------------- context limits & reasoning knobs
+
+test('context window stays under the measured 413 cutoff', () => {
+  // Probed live: 123,787 tokens accepted, 125,000 refused with HTTP 413.
+  assert.ok(DEFAULT_CONTEXT_WINDOW <= 123787, 'must not exceed the measured accepted size');
+  assert.ok(DEFAULT_CONTEXT_WINDOW >= 100000, 'must not be needlessly small');
+});
+
+test('maxTokens matches free-pi CLI MAX_OUTPUT_TOKENS', () => {
+  assert.equal(DEFAULT_MAX_TOKENS, 8192);
+});
+
+test('stripReasoningKnobs removes every reasoning knob and keeps the rest', () => {
+  const { body, stripped } = stripReasoningKnobs({
+    model: 'm',
+    messages: [],
+    tools: [{ type: 'function' }],
+    reasoning_effort: 'low',
+    reasoningEffort: 'high',
+    reasoning: 'x',
+    thinking: { type: 'disabled' },
+    thinking_budget: 5,
+    thinkingBudget: 6,
+    enable_thinking: false,
+    chat_template_kwargs: { enable_thinking: false },
+    chat_template_args: { a: 1 },
+    temperature: 0.2,
+  });
+  assert.equal(body.model, 'm');
+  assert.equal(body.temperature, 0.2);
+  assert.equal(body.tools.length, 1, 'tools must survive');
+  for (const k of ['reasoning_effort', 'reasoningEffort', 'reasoning', 'thinking', 'thinking_budget', 'thinkingBudget', 'enable_thinking', 'chat_template_kwargs', 'chat_template_args']) {
+    assert.equal(Object.hasOwn(body, k), false, `${k} should be stripped`);
+  }
+  assert.equal(stripped.length, 9);
+});
+
+test('stripReasoningKnobs leaves a clean body untouched', () => {
+  const original = { model: 'm', messages: [{ role: 'user', content: 'hi' }], stream: true };
+  const { body, stripped } = stripReasoningKnobs(original);
+  assert.deepEqual(stripped, []);
+  assert.deepEqual(body, original);
+});
+
+test('stripReasoningKnobs tolerates a non-object body', () => {
+  assert.deepEqual(stripReasoningKnobs(null).stripped, []);
+  assert.deepEqual(stripReasoningKnobs(undefined).stripped, []);
 });

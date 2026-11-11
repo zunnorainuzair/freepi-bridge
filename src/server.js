@@ -8,6 +8,46 @@ import {
 } from './upstream.js';
 import { createCatalog, resolveModelId } from './catalog.js';
 
+/**
+ * Reasoning knobs an OpenAI-compatible client may send. free-pi's CLI never
+ * sends any of them (zero occurrences of reasoning_effort in main-m86v4egg.js):
+ * reasoning is simply always on, and the backend returns reasoning_content on
+ * every response.
+ *
+ * The backend ignores reasoning_effort (measured: reasoning_tokens stayed at
+ * 11-18 whether the level was minimal, low, medium, high or xhigh). Worse, the
+ * disable-shaped ones do real damage: pi-ai's openai-completions adapter turns
+ * a declared level into `reasoning_effort`, or into `thinking: {type:
+ * "disabled"}` / `enable_thinking: false` for the zai and qwen formats. With
+ * reasoning suppressed, DeepSeek returns empty content and malformed
+ * tool_calls. So the bridge strips them and forwards exactly what free-pi's own
+ * CLI would send, which is what keeps tool calls working.
+ */
+const REASONING_KNOBS = [
+  'reasoning',
+  'reasoning_effort',
+  'reasoningEffort',
+  'thinking',
+  'thinking_budget',
+  'thinkingBudget',
+  'enable_thinking',
+  'chat_template_kwargs',
+  'chat_template_args',
+];
+
+export function stripReasoningKnobs(body) {
+  if (!body || typeof body !== 'object') return { body, stripped: [] };
+  const out = { ...body };
+  const stripped = [];
+  for (const key of REASONING_KNOBS) {
+    if (Object.hasOwn(out, key)) {
+      delete out[key];
+      stripped.push(key);
+    }
+  }
+  return { body: out, stripped };
+}
+
 const MAX_BODY = 40 * 1024 * 1024;
 
 function json(res, status, obj) {
@@ -200,6 +240,13 @@ export function createServer({ config, getToken, fetchImpl = fetch, log = () => 
     const wantsStream = body?.stream === true;
     upstreamBody.stream = wantsStream;
 
+    // Keep the request on the one path the backend is proven to handle.
+    const cleaned = stripReasoningKnobs(upstreamBody);
+    const outbound = cleaned.body;
+    if (cleaned.stripped.length && config.logRequests) {
+      log(`stripped reasoning knob(s): ${cleaned.stripped.join(', ')}`);
+    }
+
     const controller = new AbortController();
     res.on('close', () => {
       if (!res.writableEnded) controller.abort();
@@ -219,7 +266,7 @@ export function createServer({ config, getToken, fetchImpl = fetch, log = () => 
         token,
         sessionId: sessionIdFor(),
         clientVersion: loaded.latest || config.clientVersion,
-        body: upstreamBody,
+        body: outbound,
         headers: req.headers,
         signal: controller.signal,
         fetchImpl,
@@ -236,7 +283,7 @@ export function createServer({ config, getToken, fetchImpl = fetch, log = () => 
             token,
             sessionId: sessionIdFor(),
             clientVersion: loaded.latest || config.clientVersion,
-            body: upstreamBody,
+            body: outbound,
             headers: req.headers,
             signal: controller.signal,
             fetchImpl,

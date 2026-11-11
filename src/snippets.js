@@ -10,6 +10,25 @@
 
 export const DSH_PROVIDER_ID = 'freepi';
 
+/**
+ * Measured against the live backend (2026-11), not copied from the free-pi CLI:
+ * a 123,787-token prompt was accepted and a 125,000-token one was refused with
+ * HTTP 413 "This conversation is too long". 122880 leaves a safety margin, and
+ * dsh uses this value for overflow detection and auto-compaction, so
+ * over-claiming it means a conversation grows until it dies mid-turn.
+ *
+ * (The CLI's own constant is 200000, which the backend does not actually
+ * honour; do not copy it.)
+ */
+export const DEFAULT_CONTEXT_WINDOW = 122880;
+
+/**
+ * free-pi's CLI pins maxTokens to 8192 for every model
+ * (MAX_OUTPUT_TOKENS in main-m86v4egg.js). Matching it keeps dsh's output
+ * budgeting consistent with what the backend is willing to emit.
+ */
+export const DEFAULT_MAX_TOKENS = 8192;
+
 function yamlValue(v) {
   // Model ids are plain tokens, but quote anything that could parse oddly.
   return /^[A-Za-z0-9._-]+$/.test(v) ? v : JSON.stringify(v);
@@ -26,8 +45,8 @@ export function dshPatch({
   port = 8791,
   model = null,
   providerId = DSH_PROVIDER_ID,
-  contextWindow = 200000,
-  maxTokens = 32768,
+  contextWindow = DEFAULT_CONTEXT_WINDOW,
+  maxTokens = DEFAULT_MAX_TOKENS,
   // Pass a name (e.g. FREEPI_BRIDGE_API_KEY) only when the bridge is started
   // with --api-key. dsh resolves a named credential at call time and fails
   // auth when it is missing, so a keyless bridge must omit apiKeyEnv.

@@ -97,6 +97,41 @@ The model list dsh shows comes from the patch's `models:` array (dsh reads it fr
 there, not from `/v1/models`), but `/v1/models` is served too and is strictly
 OpenAI-shaped — `{object: "list", data: [{id, object: "model", created, owned_by}]}`.
 
+## Context window and reasoning (measured, not copied)
+
+Both values in the generated patch were probed against the live backend, because
+the free-pi CLI's own constants do not survive contact with it:
+
+| Setting | Value | Why |
+|---|---|---|
+| `contextWindow` | **122880** | Measured: a 123,787-token prompt was accepted, 125,000 was refused with `HTTP 413 "This conversation is too long"`. The CLI advertises 200000, which the backend does **not** honour — copying it makes dsh grow a conversation until it dies mid-turn. |
+| `maxTokens` | **8192** | Matches free-pi's `MAX_OUTPUT_TOKENS`; the backend will not emit more. |
+
+**Reasoning has no levels here.** free-pi's CLI never sends `reasoning_effort`
+(zero occurrences in its bundle). Reasoning is simply always on and every
+response carries `reasoning_content`. The backend also ignores the parameter —
+`reasoning_tokens` stayed at 11-18 whether the level was `minimal`, `low`,
+`medium`, `high` or `xhigh`.
+
+Declaring `reasoningEfforts` in the dsh patch is therefore both pointless and
+harmful: pi-ai's `openai-completions` adapter turns a declared level into
+`reasoning_effort`, or into `thinking: {type: "disabled"}` /
+`enable_thinking: false` for the zai and qwen formats, and with reasoning
+suppressed DeepSeek returns empty content plus malformed `tool_calls`.
+
+So the bridge handles it for you:
+
+- the emitted patch **omits `reasoningEfforts`**, which dsh treats as "keep the
+  installed catalog's capability";
+- the server **strips** `reasoning`, `reasoning_effort`, `reasoningEffort`,
+  `thinking`, `thinking_budget`, `thinkingBudget`, `enable_thinking`,
+  `chat_template_kwargs` and `chat_template_args` from every request, so a
+  client that sends them anyway still gets working tool calls. It forwards
+  exactly what free-pi's own CLI would send.
+
+Run the server with `--log` to see it: `stripped reasoning knob(s):
+reasoning_effort, thinking, enable_thinking`.
+
 `--write` backs the file up first and replaces only the `llm-pi-ai` and
 `agent-default-model` entries, so your other patches (permissions, UI, bundles) are
 untouched, and re-running it does not duplicate the block.
