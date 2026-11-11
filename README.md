@@ -35,7 +35,20 @@ free-pi's backend is OpenAI-shaped but not directly usable by a harness:
 Requires Node 18+ and a free-pi sign-in.
 
 ```bash
-git clone <this-repo> freepi-bridge
+npx freepi-bridge doctor
+```
+
+Or install it once and use the short alias:
+
+```bash
+npm install -g freepi-bridge
+fpb doctor          # `freepi-bridge` and `fpb` are the same command
+```
+
+From source:
+
+```bash
+git clone https://github.com/zunnorainuzair/freepi-bridge.git
 cd freepi-bridge
 npm install            # no runtime dependencies
 node bin/freepi-bridge.js doctor
@@ -54,9 +67,11 @@ npx free-pi-cli@latest      # accept terms, sign in with GitHub, then quit
 Two commands:
 
 ```bash
-freepi-bridge serve          # terminal 1 — leave it running
-freepi-bridge dsh --write    # terminal 2 — patch ~/.dsh/profiles/desktop/cordis.patch.yml
+npx freepi-bridge serve          # terminal 1 — leave it running
+npx freepi-bridge dsh --write    # terminal 2 — patch ~/.dsh/profiles/desktop/cordis.patch.yml
 ```
+
+(With a global install, use `freepi-bridge` or `fpb` instead of `npx freepi-bridge`.)
 
 Restart dsh. `freepi` appears as a provider and the chosen model becomes the default.
 
