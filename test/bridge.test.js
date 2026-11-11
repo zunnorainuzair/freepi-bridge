@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createQueue, errorFromUpstream, upstreamHeaders } from '../src/upstream.js';
 import { resolveModelId, FALLBACK_MODELS } from '../src/catalog.js';
-import { dshPatch, cleanModelName, openaiEnvSnippet } from '../src/snippets.js';
+import { dshPatch, cleanModelName, openaiEnvSnippet, DSH_PROVIDER_ID } from '../src/snippets.js';
 import { splitEntries } from '../src/patchfile.js';
 import { defaultSessionId, decodeJwt, loadConfig } from '../src/config.js';
 
@@ -184,4 +184,20 @@ test('decodeJwt reads claims and tolerates junk', () => {
   const payload = Buffer.from(JSON.stringify({ sub: 'u1', exp: 123 })).toString('base64url');
   assert.equal(decodeJwt(`h.${payload}.s`).sub, 'u1');
   assert.equal(decodeJwt('not-a-jwt'), null);
+});
+
+// ------------------------------------------------- provider details / fpb UX
+
+test('dshPatch writes a literal apiKey when the bridge requires one', () => {
+  const y = dshPatch({ models: [{ id: 'm' }], apiKey: 'sekrit' });
+  assert.match(y, /apiKey: "sekrit"/);
+  assert.doesNotMatch(y, /apiKeyEnv/);
+});
+
+test('dshPatch provider uses the lower-case id dsh requires', () => {
+  const y = dshPatch({ models: [{ id: 'm' }], model: 'm' });
+  assert.match(y, /^ {6}freepi:$/m);
+  assert.match(y, /provider: freepi/);
+  assert.equal(DSH_PROVIDER_ID, 'freepi');
+  assert.equal(DSH_PROVIDER_ID, DSH_PROVIDER_ID.toLowerCase());
 });

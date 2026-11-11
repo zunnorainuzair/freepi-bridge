@@ -32,6 +32,8 @@ export function dshPatch({
   // with --api-key. dsh resolves a named credential at call time and fails
   // auth when it is missing, so a keyless bridge must omit apiKeyEnv.
   apiKeyEnv = null,
+  // Literal key written into the patch; dsh sends it as the bearer token.
+  apiKey = null,
   includeDefault = true,
 } = {}) {
   const list = (Array.isArray(models) ? models : []).filter((m) => m && m.id);
@@ -44,6 +46,7 @@ export function dshPatch({
   out.push(`      ${providerId}:`);
   out.push('        displayName: freepi');
   if (apiKeyEnv) out.push(`        apiKeyEnv: ${apiKeyEnv}`);
+  if (apiKey) out.push(`        apiKey: ${JSON.stringify(String(apiKey))}`);
   out.push('        api: openai-completions');
   out.push(`        baseURL: http://127.0.0.1:${port}/v1`);
   out.push('        models:');

@@ -38,11 +38,11 @@ Requires Node 18+ and a free-pi sign-in.
 npx freepi-bridge doctor
 ```
 
-Or install it once and use the short alias:
+Or install it once for the short command:
 
 ```bash
 npm install -g freepi-bridge
-fpb doctor          # `freepi-bridge` and `fpb` are the same command
+freep               # starts the server (also installed as `fpb`)
 ```
 
 From source:
@@ -67,13 +67,35 @@ npx free-pi-cli@latest      # accept terms, sign in with GitHub, then quit
 Two commands:
 
 ```bash
-npx freepi-bridge serve          # terminal 1 — leave it running
-npx freepi-bridge dsh --write    # terminal 2 — patch ~/.dsh/profiles/desktop/cordis.patch.yml
+freep               # terminal 1 — starts the server and prints the provider details
+freep dsh --write   # terminal 2 — patch ~/.dsh/profiles/desktop/cordis.patch.yml
 ```
 
-(With a global install, use `freepi-bridge` or `fpb` instead of `npx freepi-bridge`.)
-
 Restart dsh. `freepi` appears as a provider and the chosen model becomes the default.
+
+`freep` with no arguments starts the server and prints exactly what dsh needs:
+
+```
+  Provider details for dsh (copy these into cordis.patch.yml):
+    provider ID   freepi
+    base URL      http://127.0.0.1:8791/v1
+    API key       freepi-bridge  (any non-empty value works; the bridge holds your free-pi sign-in)
+    api           openai-completions
+    models        /v1/models  (GET, OpenAI format — required by dsh)
+    default model deepseek-v4.1-flash
+```
+
+| dsh field | Value |
+|---|---|
+| provider ID | `freepi` (lower-case) |
+| base URL | `http://127.0.0.1:8791/v1` |
+| API key | `freepi-bridge` — any non-empty string; the real free-pi token never leaves the bridge |
+| api | `openai-completions` |
+| models | served at `GET /v1/models` in OpenAI format |
+
+The model list dsh shows comes from the patch's `models:` array (dsh reads it from
+there, not from `/v1/models`), but `/v1/models` is served too and is strictly
+OpenAI-shaped — `{object: "list", data: [{id, object: "model", created, owned_by}]}`.
 
 `--write` backs the file up first and replaces only the `llm-pi-ai` and
 `agent-default-model` entries, so your other patches (permissions, UI, bundles) are
@@ -123,14 +145,15 @@ both modes, and `reasoning_content` is passed through untouched.
 ## Commands
 
 ```
-freepi-bridge serve            start the server
-freepi-bridge models           list the models free-pi offers right now
-freepi-bridge dsh [--write]    print (or apply) the dsh profile patch
-freepi-bridge env              print OPENAI_* values
-freepi-bridge status           account, allowance, token expiry
-freepi-bridge takeover         release this account's other free-pi sessions
-freepi-bridge doctor           diagnose sign-in, token, upstream
-freepi-bridge login            run the free-pi CLI to sign in
+freep                          start the server (same as `serve`)
+freep serve                    start the server explicitly
+freep models                   list the models free-pi offers right now
+freep dsh [--write]            print (or apply) the dsh profile patch
+freep env                      print OPENAI_* values
+freep status                   account, allowance, token expiry
+freep takeover                 release this account's other free-pi sessions
+freep doctor                   diagnose sign-in, token, upstream
+freep login                    run the free-pi CLI to sign in
 ```
 
 ## Models

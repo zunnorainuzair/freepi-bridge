@@ -15,6 +15,7 @@
   },
   "bin": {
     "freepi-bridge": "bin/freepi-bridge.js",
+    "freep": "bin/freepi-bridge.js",
     "fpb": "bin/freepi-bridge.js"
   },
   "files": [

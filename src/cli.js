@@ -11,9 +11,19 @@ import {
 import { createCatalog } from './catalog.js';
 import { BridgeError, fetchMe } from './upstream.js';
 import { createServer as createBridge } from './server.js';
-import { cleanModelName, dshPatch, openaiEnvSnippet, renderModelTable } from './snippets.js';
+import { cleanModelName, dshPatch, openaiEnvSnippet, renderModelTable, DSH_PROVIDER_ID } from './snippets.js';
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+/**
+ * dsh's provider loader reads its model catalog from the patch file, but every
+ * OpenAI-compatible route still needs a served GET /v1/models, so the banner
+ * points at the live one rather than at the patch.
+ */
+const DSH_MODELS_URL = '/v1/models';
+
+/** Placeholder dsh sends as the bearer token when a route needs no real key. */
+const DEFAULT_API_KEY = 'freepi-bridge';
 
 const HELP = `freepi-bridge ${PKG.version} — use free-pi (freepi.ai) models from dsh and any OpenAI client.
 
@@ -21,6 +31,7 @@ It reuses the sign-in token the free-pi CLI already stores, so there is no API
 key to copy: sign in once with \`npx free-pi-cli@latest\` and the bridge works.
 
 Usage:
+  freepi-bridge                              start the server (same as \`serve\`)
   freepi-bridge serve [--port N] [--host H]   start the OpenAI-compatible server
   freepi-bridge models [--json]               list the models free-pi offers now
   freepi-bridge dsh [--port N] [--model ID]   print a dsh cordis.patch.yml block
@@ -28,6 +39,9 @@ Usage:
   freepi-bridge status                        show the free-pi account and allowance
   freepi-bridge takeover                      release this account's other free-pi sessions
   freepi-bridge doctor                        check sign-in, token expiry, upstream
+
+The command is installed as \`freep\` (and \`fpb\`); \`freep\` alone starts the server
+and prints the provider ID, base URL and API key that dsh needs.
   freepi-bridge login                         run the free-pi CLI to sign in
   freepi-bridge version                       print the version
 
@@ -164,19 +178,31 @@ async function cmdServe(flags) {
 
   const def = pickDefaultModel(catalog);
   const expiry = claims?.exp ? new Date(claims.exp * 1000) : null;
-  log(bold('freepi-bridge') + ` listening on http://${config.host}:${config.port}`);
-  log(`  upstream   ${config.baseUrl}`);
-  log(`  models     ${catalog.models.length} (${catalog.source}${catalog.latest ? `, client ${catalog.latest}` : ''})`);
-  if (def) log(`  default    ${def}`);
+  const baseUrl = `http://${config.host}:${config.port}/v1`;
+  const apiKey = config.apiKey || DEFAULT_API_KEY;
+
+  log(bold('freepi-bridge') + ` is running — press Ctrl-C to stop`);
+  log('');
+  log(bold('  Provider details for dsh (copy these into cordis.patch.yml):'));
+  log(`    provider ID   ${DSH_PROVIDER_ID}`);
+  log(`    base URL      ${baseUrl}`);
+  log(`    API key       ${apiKey}${config.apiKey ? '' : dim('  (any non-empty value works; the bridge holds your free-pi sign-in)')}`);
+  log(`    api           openai-completions`);
+  log(`    models        ${DSH_MODELS_URL}${dim('  (GET, OpenAI format — required by dsh)')}`);
+  if (def) log(`    default model ${def}`);
+  log('');
+  log(bold('  Status:'));
+  log(`    upstream      ${config.baseUrl}`);
+  log(`    models        ${catalog.models.length} from ${catalog.source}${catalog.latest ? `, client ${catalog.latest}` : ''}`);
   if (expiry) {
     const days = Math.round((expiry.getTime() - Date.now()) / 86400000);
-    log(`  sign-in    ${days > 0 ? `valid for ${days} more day(s)` : 'expired'} (${expiry.toISOString().slice(0, 10)})`);
+    log(`    sign-in       ${days > 0 ? `valid for ${days} more day(s)` : 'expired'} (${expiry.toISOString().slice(0, 10)})`);
   }
-  log(`  endpoints  GET /v1/models · POST /v1/chat/completions · GET /v1/usage · GET /health`);
-  log(dim(`  concurrency ${config.maxUpstream} upstream request(s); extra requests queue`));
+  log(`    concurrency   ${config.maxUpstream} upstream request(s); extra requests queue`);
+  log(`    endpoints     GET ${DSH_MODELS_URL} · POST /v1/chat/completions · GET /v1/usage · GET /health`);
   log('');
-  log(`Point dsh at it:  freepi-bridge dsh --write`);
-  log(dim(`Or any client:    freepi-bridge env`));
+  log(`Apply the dsh provider automatically:  ${bold('fpb dsh --write')}   ${dim('(then restart dsh)')}`);
+  log(dim(`Only the model list, without the server: fpb dsh`));
 
   const shutdown = async () => {
     log('\nshutting down…');
@@ -229,7 +255,9 @@ async function cmdDsh(flags) {
     logErr(dim(`note: ${requested} is not in the current catalog; emitting it anyway`));
   }
 
-  const patch = dshPatch({ models, port: config.port, model, apiKeyEnv: config.apiKey ? 'FREEPI_BRIDGE_API_KEY' : null });
+  // When the bridge requires a key, write that exact key into the patch so dsh
+  // sends it; a keyless bridge omits the field entirely.
+  const patch = dshPatch({ models, port: config.port, model, apiKey: config.apiKey || null });
 
   if (flags.write) {
     const profile = typeof flags.profile === 'string' ? flags.profile : 'desktop';
@@ -389,8 +417,8 @@ export async function main(argv = process.argv.slice(2)) {
     case 'login':
       return cmdLogin();
     case null:
-      log(HELP);
-      return;
+      // Bare `freep` is the common case: start serving immediately.
+      return cmdServe(flags);
     default:
       logErr(`Unknown command: ${command}`);
       logErr('Run `freepi-bridge --help`.');
