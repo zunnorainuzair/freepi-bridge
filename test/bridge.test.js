@@ -4,7 +4,7 @@ import { createQueue, errorFromUpstream, upstreamHeaders } from '../src/upstream
 import { stripReasoningKnobs } from '../src/server.js';
 import { resolveModelId, FALLBACK_MODELS } from '../src/catalog.js';
 import { dshPatch, cleanModelName, openaiEnvSnippet, DSH_PROVIDER_ID, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from '../src/snippets.js';
-import { splitEntries } from '../src/patchfile.js';
+import { splitEntries, readProviders, mergeProviderEntry } from '../src/patchfile.js';
 import { defaultSessionId, decodeJwt, loadConfig } from '../src/config.js';
 
 const catalog = {
@@ -250,4 +250,55 @@ test('stripReasoningKnobs leaves a clean body untouched', () => {
 test('stripReasoningKnobs tolerates a non-object body', () => {
   assert.deepEqual(stripReasoningKnobs(null).stripped, []);
   assert.deepEqual(stripReasoningKnobs(undefined).stripped, []);
+});
+
+// ------------------------------------------- merging into an existing profile
+
+const EXISTING = `- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      deepseek-bridge:
+        displayName: dsb
+        api: openai-completions
+        baseURL: http://127.0.0.1:8787/v1
+        models:
+          - id: deepseek-reasoner
+            contextWindow: 890880
+      freepi:
+        displayName: old
+        baseURL: http://127.0.0.1:9999/v1
+        models:
+          - id: stale
+`;
+
+test('readProviders finds each provider block', () => {
+  const p = readProviders(EXISTING);
+  assert.deepEqual(p.map((x) => x.name), ['deepseek-bridge', 'freepi']);
+  assert.match(p[0].lines.join('\n'), /deepseek-reasoner/);
+});
+
+test('mergeProviderEntry keeps unmanaged providers and replaces its own', () => {
+  const ours = dshPatch({ models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }], model: 'deepseek-v4.1-flash' });
+  const { text, preserved } = mergeProviderEntry(EXISTING, ours, ['freepi']);
+  assert.deepEqual(preserved, ['deepseek-bridge']);
+  assert.match(text, /deepseek-bridge:/);
+  assert.match(text, /deepseek-reasoner/);
+  assert.match(text, /890880/, 'their model settings survive');
+  assert.match(text, /deepseek-v4\.1-flash/);
+  assert.doesNotMatch(text, /:9999/, 'our port replaces the stale one');
+  assert.doesNotMatch(text, /id: stale/, 'stale managed models are dropped');
+  assert.doesNotMatch(text, /displayName: old/);
+});
+
+test('mergeProviderEntry returns our text when nothing else is managed', () => {
+  const ours = dshPatch({ models: [{ id: 'm' }] });
+  const onlyOurs = `- id: llm-pi-ai
+  config:
+    providers:
+      freepi:
+        baseURL: http://x/v1
+`;
+  const { preserved } = mergeProviderEntry(onlyOurs, ours, ['freepi']);
+  assert.deepEqual(preserved, []);
 });
