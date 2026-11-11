@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import {
@@ -233,6 +234,20 @@ async function cmdModels(flags) {
   log(dim('* = default. Models marked with a usage multiplier spend your daily allowance faster.'));
 }
 
+function dshRunning() {
+  try {
+    const out = execSync(
+      process.platform === 'win32' ? 'tasklist' : 'ps -eo comm',
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    return process.platform === 'win32'
+      ? /DeepSeek Harness\.exe/i.test(out)
+      : /deepseek-harness|dsh/i.test(out);
+  } catch {
+    return false;
+  }
+}
+
 async function cmdDsh(flags) {
   const config = loadConfig(process.env, { port: intFlag(flags.port, undefined) });
   const token = readFreePiToken(process.env);
@@ -266,10 +281,33 @@ async function cmdDsh(flags) {
     if (!existsSync(dirname(target))) {
       throw new BridgeError(`dsh profile not found: ${dirname(target)}`, { status: 404, code: 'no_profile' });
     }
+    // dsh treats cordis.patch.yml as its own projection of internal config and
+    // rewrites it on save/exit. Writing while it runs silently loses the edit
+    // (observed: the freepi provider vanished ~3 min later, leaving the default
+    // model pointing at a provider that no longer existed).
+    if (dshRunning() && !flags.force) {
+      throw new BridgeError(
+        [
+          'dsh is running, and it rewrites cordis.patch.yml itself.',
+          'Writing now would be silently discarded (and can leave your default',
+          'model pointing at a provider that no longer exists).',
+          '',
+          '  1. Quit DeepSeek Harness completely.',
+          '  2. Re-run: freep dsh --write',
+          '  3. Start dsh again.',
+          '',
+          'Use --force to write anyway.',
+        ].join('\n'),
+        { status: 409, code: 'dsh_running' },
+      );
+    }
     const { backupAndWritePatch } = await import('./patchfile.js');
     const result = backupAndWritePatch(target, patch);
     log(bold('wrote ') + target);
     log(dim(`  backup: ${result.backup}`));
+    if (result.preservedProviders?.length) {
+      log(dim(`  kept your other providers: ${result.preservedProviders.join(', ')}`));
+    }
     log('');
     log('Restart dsh to pick it up. Then: freepi-bridge serve');
     return;
