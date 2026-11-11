@@ -251,3 +251,28 @@ npm test
 Design and CLI shape follow `deepseek-bridge` by sarimmohib (Unlicense). This port targets
 the free-pi CLI's real endpoint, so it is a thin proxy rather than a protocol
 reimplementation.
+
+## Checking for drift
+
+dsh rewrites `cordis.patch.yml` from its own internal config, so it can revert
+the provider block behind your back. That revert is invisible until a turn fails
+with `413 context_too_long` (a profile claiming 200000 makes dsh let a
+conversation grow past the ~124k the backend accepts).
+
+```bash
+freep dsh --check
+```
+
+```
+profile: ~/.dsh/profiles/desktop/cordis.patch.yml
+  DRIFT contextWindow 200000 exceeds the measured backend limit (expected <= 122880)
+  DRIFT maxTokens 32768 exceeds free-pi's 8192
+  DRIFT apiKeyEnv: FREEPI_API_KEY is set — the bridge is keyless, so remove it
+  DRIFT reasoningEfforts is set — breaks tool calls
+```
+
+Exit code is 1 when anything drifted. Fix by quitting dsh, running
+`freep dsh --write`, and starting dsh again.
+
+If the *session* already grew past the limit, the profile fix will not shrink
+it — start a new chat (`/new`) or compact.

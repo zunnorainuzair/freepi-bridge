@@ -12,7 +12,7 @@ import {
 import { createCatalog } from './catalog.js';
 import { BridgeError, fetchMe } from './upstream.js';
 import { createServer as createBridge } from './server.js';
-import { cleanModelName, dshPatch, openaiEnvSnippet, renderModelTable, DSH_PROVIDER_ID } from './snippets.js';
+import { cleanModelName, dshPatch, openaiEnvSnippet, renderModelTable, DSH_PROVIDER_ID, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from './snippets.js';
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -273,6 +273,30 @@ async function cmdDsh(flags) {
   // When the bridge requires a key, write that exact key into the patch so dsh
   // sends it; a keyless bridge omits the field entirely.
   const patch = dshPatch({ models, port: config.port, model, apiKey: config.apiKey || null });
+
+  if (flags.check) {
+    const profile = typeof flags.profile === 'string' ? flags.profile : 'desktop';
+    const home = process.env.HOME || process.env.USERPROFILE || '';
+    const target = join(home, '.dsh', 'profiles', profile, 'cordis.patch.yml');
+    const { diffProfile } = await import('./patchfile.js');
+    const problems = diffProfile(readFileSync(target, 'utf8'), {
+      providerId: DSH_PROVIDER_ID,
+      model,
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
+      modelIds: models.map((m) => m.id),
+    });
+    log(bold(`profile: ${target}`));
+    if (problems.length === 0) {
+      log('  ok  matches what the bridge expects');
+      return;
+    }
+    for (const p of problems) logErr(`  DRIFT ${p}`);
+    logErr('');
+    logErr('Quit dsh, run `freep dsh --write`, then start dsh again.');
+    process.exitCode = 1;
+    return;
+  }
 
   if (flags.write) {
     const profile = typeof flags.profile === 'string' ? flags.profile : 'desktop';

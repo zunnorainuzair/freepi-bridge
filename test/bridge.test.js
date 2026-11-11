@@ -4,7 +4,7 @@ import { createQueue, errorFromUpstream, upstreamHeaders } from '../src/upstream
 import { stripReasoningKnobs } from '../src/server.js';
 import { resolveModelId, FALLBACK_MODELS } from '../src/catalog.js';
 import { dshPatch, cleanModelName, openaiEnvSnippet, DSH_PROVIDER_ID, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from '../src/snippets.js';
-import { splitEntries, readProviders, mergeProviderEntry } from '../src/patchfile.js';
+import { splitEntries, readProviders, mergeProviderEntry, diffProfile } from '../src/patchfile.js';
 import { defaultSessionId, decodeJwt, loadConfig } from '../src/config.js';
 
 const catalog = {
@@ -301,4 +301,47 @@ test('mergeProviderEntry returns our text when nothing else is managed', () => {
 `;
   const { preserved } = mergeProviderEntry(onlyOurs, ours, ['freepi']);
   assert.deepEqual(preserved, []);
+});
+
+// ------------------------------------------------------- profile drift check
+
+const DRIFTED = `- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      freepi:
+        apiKeyEnv: FREEPI_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:8791/v1
+        models:
+          - id: deepseek-v4-flash
+            contextWindow: 200000
+            maxTokens: 32768
+            reasoningEfforts:
+              low: low
+- id: agent-default-model
+  config:
+    provider: freepi
+    model: deepseek-v4-flash
+`;
+
+const expected = { providerId: 'freepi', model: 'deepseek-v4-flash', contextWindow: 122880, maxTokens: 8192, modelIds: ['deepseek-v4-flash'] };
+
+test('diffProfile flags the exact drift that causes HTTP 413', () => {
+  const problems = diffProfile(DRIFTED, expected).join('\n');
+  assert.match(problems, /apiKeyEnv/);
+  assert.match(problems, /reasoningEfforts/);
+  assert.match(problems, /contextWindow 200000/);
+  assert.match(problems, /maxTokens 32768/);
+});
+
+test('diffProfile reports a clean, generated profile as ok', () => {
+  const good = dshPatch({ models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }], model: 'deepseek-v4-flash' });
+  assert.deepEqual(diffProfile(good, expected), []);
+});
+
+test('diffProfile catches a default model the provider cannot resolve', () => {
+  const y = dshPatch({ models: [{ id: 'other' }], model: 'missing-model' });
+  const problems = diffProfile(y, { ...expected, modelIds: ['other'] }).join('\n');
+  assert.match(problems, /cannot resolve|not in the provider/);
 });

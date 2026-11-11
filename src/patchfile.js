@@ -141,3 +141,61 @@ export function splitEntries(text) {
   if (current) entries.push(current);
   return entries;
 }
+
+/**
+ * Report how a live profile differs from what the bridge would emit.
+ *
+ * This exists because the drift below is invisible in dsh and shows up only as
+ * a runtime failure: a profile claiming a 200000 context window makes dsh let a
+ * conversation grow past the ~124k the backend actually accepts, and the turn
+ * dies with HTTP 413 context_too_long.
+ */
+export function diffProfile(text, { providerId = 'freepi', model, contextWindow, maxTokens, modelIds = [] } = {}) {
+  const problems = [];
+  const entries = splitEntries(text);
+  const llm = entries.find((e) => e.id === 'llm-pi-ai');
+  if (!llm) return ['no llm-pi-ai entry'];
+
+  const providers = readProviders(llm.text);
+  const ours = providers.find((p) => p.name === providerId);
+  if (!ours) return [`no "${providerId}" provider`];
+
+  const block = ours.lines.join('\n');
+
+  if (/^\s+apiKeyEnv:/m.test(block)) {
+    const env = /^\s+apiKeyEnv:\s*(\S+)/m.exec(block)?.[1];
+    problems.push(`apiKeyEnv: ${env} is set — dsh will demand that env var and fail if it is unset; the bridge is keyless, so remove it`);
+  }
+  if (/^\s+reasoningEfforts:/m.test(block)) {
+    problems.push('reasoningEfforts is set — free-pi has no reasoning levels, and a declared level turns into reasoning_effort / thinking:disabled, which breaks tool calls');
+  }
+
+  const windows = [...block.matchAll(/contextWindow:\s*(\d+)/g)].map((m) => Number(m[1]));
+  const oversize = windows.filter((w) => w > contextWindow);
+  if (oversize.length) {
+    problems.push(`contextWindow ${oversize[0]} exceeds the measured backend limit; conversations grow until they fail with HTTP 413 (expected <= ${contextWindow})`);
+  }
+
+  const outputs = [...block.matchAll(/maxTokens:\s*(\d+)/g)].map((m) => Number(m[1]));
+  const bigOut = outputs.filter((w) => w > maxTokens);
+  if (bigOut.length) problems.push(`maxTokens ${bigOut[0]} exceeds free-pi's ${maxTokens}`);
+
+  const present = [...block.matchAll(/^\s+- id:\s*(\S+)/gm)].map((m) => m[1]);
+  if (modelIds.length) {
+    const missing = modelIds.filter((id) => !present.includes(id));
+    if (missing.length) problems.push(`${missing.length} catalog model(s) not in the patch (first: ${missing[0]})`);
+  }
+
+  const def = entries.find((e) => e.id === 'agent-default-model');
+  if (def) {
+    const dp = /provider:\s*(\S+)/.exec(def.text)?.[1];
+    const dm = /model:\s*(\S+)/.exec(def.text)?.[1];
+    if (dp !== providerId) problems.push(`default model provider is "${dp}", expected "${providerId}"`);
+    if (model && dm !== model) problems.push(`default model is "${dm}", expected "${model}"`);
+    if (dp === providerId && dm && modelIds.length && !modelIds.includes(dm)) {
+      problems.push(`default model "${dm}" is not in the provider's model list — dsh cannot resolve it`);
+    }
+  }
+
+  return problems;
+}
