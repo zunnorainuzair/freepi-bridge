@@ -1,0 +1,33 @@
+{
+  "name": "freepi-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenAI-compatible local API for free-pi (freepi.ai), so DeepSeek Harness (dsh) and any OpenAI client can use free-pi models. Reads your existing free-pi sign-in; no API key needed.",
+  "license": "MIT",
+  "bin": {
+    "freepi-bridge": "./bin/freepi-bridge.js",
+    "fpb": "./bin/freepi-bridge.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node bin/freepi-bridge.js serve",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "free-pi",
+    "freepi",
+    "dsh",
+    "deepseek-harness",
+    "openai",
+    "bridge",
+    "llm"
+  ]
+}
