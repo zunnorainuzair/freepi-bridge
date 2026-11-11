@@ -79,6 +79,10 @@ export function createQueue({ max = 1, timeoutMs = 180000 } = {}) {
     state.queued += 1;
     return new Promise((resolve, reject) => {
       const waiter = { resolve, reject, cancelled: false, timer: null };
+      // Deliberately not unref'd: this timer is what settles the promise when
+      // the queue never frees up. Unref'ing it lets the process exit with the
+      // rejection still pending ("event loop has already resolved"), which
+      // turns a clean timeout into a cancelled test/hang.
       waiter.timer = setTimeout(() => {
         if (waiter.cancelled) return;
         waiter.cancelled = true;
@@ -92,7 +96,6 @@ export function createQueue({ max = 1, timeoutMs = 180000 } = {}) {
           }),
         );
       }, timeoutMs);
-      waiter.timer.unref?.();
 
       if (signal) {
         const onAbort = () => {
